@@ -1975,9 +1975,25 @@ def recommendation():
 # START
 # =========================================================
 
-if __name__ == "__main__":
 
+
+    # =========================================================
+# VERCEL INITIALIZATION
+# =========================================================
+
+# Vercel imports app.py instead of running it as __main__.
+# Therefore initialize the database when the module is loaded.
+try:
     init_db()
+except Exception as e:
+    print("Database initialization error:", e)
+
+
+# =========================================================
+# LOCAL START
+# =========================================================
+
+if __name__ == "__main__":
 
     print("")
     print("======================================")
