@@ -1,7 +1,370 @@
-<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>PulseCheck — Login</title>
-<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:Inter,Arial,sans-serif;background:#f7f7f7;color:#111;display:grid;place-items:center;padding:24px}.wrap{width:min(940px,100%);display:grid;grid-template-columns:1fr 1fr;background:#fff;border:1px solid #e5e5e5;border-radius:24px;overflow:hidden;box-shadow:0 18px 60px rgba(0,0,0,.08)}.intro{background:#111;color:#fff;padding:48px}.intro h1{font-size:42px;margin:10px 0}.intro p{color:#bbb;line-height:1.7}.box{padding:42px}.tabs{display:flex;gap:8px;margin-bottom:22px}.tab{flex:1;padding:11px;border:1px solid #ddd;border-radius:10px;background:#fff;font-weight:800;cursor:pointer}.tab.active{background:#111;color:#fff}.field{margin-bottom:13px}.field label{display:block;font-size:11px;font-weight:800;letter-spacing:1px;margin-bottom:7px;color:#666}.field input,.field select{width:100%;padding:13px;border:1px solid #ddd;border-radius:11px;font:inherit}.btn{width:100%;border:0;background:#111;color:#fff;padding:14px;border-radius:11px;font-weight:800;cursor:pointer;margin-top:6px}.msg{display:none;margin-top:12px;padding:11px;border-radius:10px;background:#ffe8e8;color:#b42318;font-size:13px;font-weight:700}.hint{font-size:12px;color:#777;line-height:1.6;margin-top:15px}@media(max-width:760px){.wrap{grid-template-columns:1fr}.intro{padding:30px}.intro h1{font-size:32px}.box{padding:30px}}</style></head>
-<body><div class="wrap"><div class="intro"><div style="font-weight:800;font-size:20px">♨ PulseCheck</div><h1>See the problem.<br>Solve the problem.</h1><p>AI-powered team progress and mentor support for fast-moving teams.</p></div><div class="box"><div class="tabs"><button class="tab active" id="loginTab" onclick="showLogin()">Sign in</button><button class="tab" id="registerTab" onclick="showRegister()">Create account</button></div>
-<form id="loginForm"><div class="field"><label>EMAIL</label><input id="loginEmail" type="email" required></div><div class="field"><label>PASSWORD</label><input id="loginPassword" type="password" required></div><button class="btn">Sign in</button></form>
-<form id="registerForm" style="display:none"><div class="field"><label>NAME</label><input id="regName" required></div><div class="field"><label>EMAIL</label><input id="regEmail" type="email" required></div><div class="field"><label>PASSWORD</label><input id="regPassword" type="password" minlength="6" required></div><div class="field"><label>ROLE</label><select id="regRole"><option value="team">Team member</option><option value="mentor">Mentor</option></select></div><button class="btn">Create account</button><div class="hint">After signing in as a team member, choose <b>Create Team</b> or <b>Join Team</b>. A team is not created automatically.</div></form><div id="msg" class="msg"></div></div></div>
-<script>const msg=document.getElementById('msg');function showMsg(t){msg.style.display='block';msg.textContent=t}function showLogin(){loginForm.style.display='block';registerForm.style.display='none';loginTab.classList.add('active');registerTab.classList.remove('active');msg.style.display='none'}function showRegister(){loginForm.style.display='none';registerForm.style.display='block';registerTab.classList.add('active');loginTab.classList.remove('active');msg.style.display='none'}loginForm.addEventListener('submit',async e=>{e.preventDefault();const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:loginEmail.value,password:loginPassword.value})});const d=await r.json();if(r.ok)location.href='/dashboard';else showMsg(d.error||'Unable to sign in.')});registerForm.addEventListener('submit',async e=>{e.preventDefault();const r=await fetch('/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:regName.value,email:regEmail.value,password:regPassword.value,role:regRole.value})});const d=await r.json();if(r.ok)location.href='/dashboard';else showMsg(d.error||'Unable to create account.')});</script></body></html>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PulseCheck — Access</title>
+<link rel="stylesheet" href="/static/style.css">
+
+<style>
+.auth-page{
+  min-height:calc(100vh - 70px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:45px 20px;
+}
+
+.auth-container{
+  width:min(1000px,100%);
+}
+
+.auth-header{
+  text-align:center;
+  margin-bottom:30px;
+}
+
+.auth-header label{
+  font-size:35px;
+  letter-spacing:2px;
+}
+
+.auth-header h1{
+  font-size:40px;
+  margin:10px 0;
+}
+
+.auth-header p{
+  opacity:.65;
+  margin:0;
+}
+
+.auth-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:24px;
+}
+
+.auth-card{
+  padding: 30px;
+    border: 7px solid rgba(255, 255, 255, .12);
+    border-radius: 18px;
+    background: darkslategray;
+box-shadow: 1px 2px 20px cornflowerblue;}
+
+.auth-card.create{
+  border-color:rgba(255,255,255,.2);
+}
+
+.auth-icon{
+  font-size:28px;
+  margin-bottom:12px;
+}
+
+.auth-card h2{
+  margin:0 0 8px;
+  font-size:26px;
+}
+
+.auth-card .subtitle{
+ font-size: 15px;
+    margin-bottom: 22px;
+color: darkkhaki;}
+
+.auth-card input,
+.auth-card select{
+  width:100%;
+  box-sizing:border-box;
+  padding:13px 14px;
+  margin-bottom:12px;
+  border-radius:9px;
+  border:1px solid rgba(255,255,255,.13);
+  background:rgba(0,0,0,.18);
+  color:inherit;
+  margin-top: 20px;
+}
+
+.auth-card input:focus,
+.auth-card select:focus{
+  outline:none;
+  border-color:rgba(255,255,255,.4);
+}
+
+.auth-card .btn{
+ width: 100%;
+    margin-top: 17px;
+    background: lightblue;
+    color: black;
+}
+
+.demo-box{
+  margin-top: 18px;
+    padding: 13px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, .045);
+    font-size: 16px;
+    line-height: 1.6;
+    opacity: .75;
+    color: white;
+}
+
+.message{
+  min-height:20px;
+  font-size:13px;
+  margin-top:10px;
+}
+
+@media(max-width:750px){
+  .auth-grid{
+    grid-template-columns:1fr;
+  }
+
+  .auth-header h1{
+    font-size:30px;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<nav>
+  <a class="brand" href="/">
+    <b>♨</b><i> PulseCheck</i>
+  </a>
+
+  <a href="/">Home</a>
+</nav>
+
+<main class="auth-page">
+
+<div class="auth-container">
+
+  <div class="auth-header">
+    <label> ♨ <i><b>PulseCheck</b></i></label>
+    <h1>Keep your team moving.</h1>
+    <p>Track progress, identify blockers and get mentors involved early.</p>
+  </div>
+
+
+  <div class="auth-grid">
+
+    <!-- LOGIN CARD -->
+    <section class="auth-card">
+
+      <div class="auth-icon">🔐</div>
+
+      <h2>Log in</h2>
+
+      <p class="subtitle">
+        Already have a PulseCheck account?
+      </p>
+
+      
+
+      <form id="loginForm">
+
+        <input
+          id="email"
+          type="email"
+          placeholder="Email"
+          required
+        >
+
+        <input
+          id="password"
+          type="password"
+          placeholder="Password"
+          required
+        >
+
+        <button class="btn" type="submit">
+          Log in →
+        </button>
+
+      </form>
+
+      <p id="loginMessage" class="message"></p>
+
+    </section>
+
+
+    <!-- CREATE ACCOUNT CARD -->
+    <section class="auth-card create">
+
+      <div class="auth-icon">✨</div>
+
+      <h2>Create account</h2>
+
+      <p class="subtitle">
+        New to PulseCheck? Create your account.
+      </p>
+
+      <form id="registerForm">
+
+        <input
+          id="name"
+          type="text"
+          placeholder="Your name"
+          required
+        >
+
+        <input
+          id="registerEmail"
+          type="email"
+          placeholder="Email"
+          required
+        >
+
+        <input
+          id="registerPassword"
+          type="password"
+          placeholder="Password (6+ characters)"
+          minlength="6"
+          required
+        >
+
+        <select id="role">
+          <option value="team">👥 Team member</option>
+        </select>
+
+        <button class="btn ghost" type="submit">
+          Create account →
+        </button>
+
+      </form>
+
+      <p id="registerMessage" class="message"></p>
+
+      <div class="demo-box">
+        <b>What happens next?</b><br>
+        Team members can submit pulses and blockers.<br>
+        Mentors can monitor team health and intervene early.
+      </div>
+
+    </section>
+
+  </div>
+
+</div>
+
+</main>
+
+
+<script>
+
+function fill(email,password){
+  document.getElementById("email").value=email;
+  document.getElementById("password").value=password;
+}
+
+
+/* LOGIN */
+
+document.getElementById("loginForm").onsubmit = async function(e){
+
+  e.preventDefault();
+
+  const message=document.getElementById("loginMessage");
+
+  message.textContent="Logging in...";
+
+  try{
+
+    const response=await fetch("/api/auth/login",{
+
+      method:"POST",
+
+      headers:{
+        "Content-Type":"application/json"
+      },
+
+      body:JSON.stringify({
+
+        email:document.getElementById("email").value,
+
+        password:document.getElementById("password").value
+
+      })
+
+    });
+
+    const data=await response.json();
+
+    if(response.ok){
+
+      location="/dashboard";
+
+    }else{
+
+      message.textContent=data.error || "Invalid login.";
+
+    }
+
+  }catch(error){
+
+    message.textContent="Unable to connect to server.";
+
+  }
+
+};
+
+
+/* CREATE ACCOUNT */
+
+document.getElementById("registerForm").onsubmit = async function(e){
+
+  e.preventDefault();
+
+  const message=document.getElementById("registerMessage");
+
+  message.textContent="Creating account...";
+
+  try{
+
+    const response=await fetch("/api/auth/register",{
+
+      method:"POST",
+
+      headers:{
+        "Content-Type":"application/json"
+      },
+
+      body:JSON.stringify({
+
+        name:document.getElementById("name").value,
+
+        email:document.getElementById("registerEmail").value,
+
+        password:document.getElementById("registerPassword").value,
+
+        role:document.getElementById("role").value
+
+      })
+
+    });
+
+    const data=await response.json();
+
+    if(response.ok){
+
+      location="/dashboard";
+
+    }else{
+
+      message.textContent=data.error || "Could not create account.";
+
+    }
+
+  }catch(error){
+
+    message.textContent="Unable to connect to server.";
+
+  }
+
+};
+
+</script>
+
+</body>
+</html>
