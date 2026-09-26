@@ -232,10 +232,17 @@ def init_db():
     c.close()
 
     # Initialize database when Flask is imported by Vercel/serverless.
-try:
-    init_db()
-except Exception as e:
-    print("Database initialization error:", e)
+DB = os.path.join(BASE_DIR, "pulsecheck.db")
+
+if os.environ.get("VERCEL"):
+    VERCEL_DB = "/tmp/pulsecheck.db"
+
+    if not os.path.exists(VERCEL_DB):
+        import shutil
+        if os.path.exists(DB):
+            shutil.copy2(DB, VERCEL_DB)
+
+    DB = VERCEL_DB
 
 
 # =========================================================
@@ -1995,10 +2002,7 @@ def recommendation():
 
 # Vercel imports app.py instead of running it as __main__.
 # Therefore initialize the database when the module is loaded.
-try:
-    init_db()
-except Exception as e:
-    print("Database initialization error:", e)
+
 
 
 # =========================================================
