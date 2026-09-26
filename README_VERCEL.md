@@ -1,38 +1,48 @@
-# PulseCheck — Vercel deployment
+# PulseCheck — Vercel fixed deployment
 
-This package keeps the existing Flask application and frontend structure.
+This package keeps the existing PulseCheck Flask app and routes. The fix is specifically for the Vercel error:
 
-## Structure
+`jinja2.exceptions.TemplateNotFound: index.html`
 
-- `app.py` — existing Flask backend
-- `templates/index.html` — landing page
-- `templates/login.html` — login/register
-- `templates/dashboard.html` — team + mentor dashboard
-- `static/style.css` — shared landing-page styling
-- `requirements.txt` — Python dependencies
+The deployment explicitly bundles the Flask `templates/` and `static/` folders with the `app.py` Vercel Function and uses an absolute template/static path.
+
+## Upload/deploy exactly this folder
+
+The project root must directly contain:
+
+- `app.py`
+- `vercel.json`
+- `requirements.txt`
+- `templates/index.html`
+- `templates/login.html`
+- `templates/dashboard.html`
+- `static/style.css`
+
+Do **not** upload the parent folder containing this folder as the Vercel project root, and do not place `templates` beside some other nested project directory.
+
+## Vercel settings
+
+- Framework Preset: Flask (or leave Auto Detect)
+- Build Command: empty/default
+- Output Directory: empty/default
+- Install Command: default
+
+The `vercel.json` `includeFiles` rule is the important part for this deployment: it packages `templates/**` and `static/**` with `app.py`.
+
+## Environment variables
+
+Add the existing values you use, especially:
+
+- `SECRET_KEY`
+- `PULSECHECK_AI_API_KEY` or `OPENAI_API_KEY` if the external AI provider is enabled
+- `PULSECHECK_AI_MODEL` if your current app expects it
+
+## SQLite
+
+The app already uses `/tmp/pulsecheck.db` when `VERCEL` is set. This allows the demo to write during a serverless instance, but `/tmp` is ephemeral and is not permanent multi-user storage. Move to PostgreSQL later for persistent production data.
 
 ## Local run
 
 ```powershell
 python app.py
 ```
-
-## Vercel
-
-1. Put this folder in a GitHub repository.
-2. Import the repository into Vercel.
-3. Vercel detects Flask/Python automatically.
-4. No custom build command is required.
-5. Add environment variables:
-   - `SECRET_KEY` = a long random value
-   - `PULSECHECK_AI_API_KEY` = your AI provider key, if using the external AI copilot
-   - `PULSECHECK_AI_MODEL` = your configured model name, if required
-6. Deploy.
-
-## Important SQLite note
-
-The app keeps SQLite for compatibility with the existing project. On Vercel, the database is placed in `/tmp` so the demo can run without trying to write into the deployed source filesystem.
-
-`/tmp` is ephemeral. Data created on one serverless instance is not guaranteed to survive a new deployment/cold instance and is not suitable for reliable multi-user production persistence.
-
-For a permanent public deployment, the next upgrade should move the database to PostgreSQL (Neon/Supabase/etc.) while leaving the UI and API workflow unchanged.
