@@ -1,12 +1,3 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "flask",
-  "functions": {
-    "app.py": {
-      "includeFiles": [
-        "templates/**",
-        "static/**"
-      ]
-    }
-  }
+  "$schema": "https://openapi.vercel.sh/vercel.json"
 }
