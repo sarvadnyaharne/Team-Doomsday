@@ -2,42 +2,20 @@ from flask import Flask, request, jsonify, session, render_template, redirect
 from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
 import os
-import json
-import urllib.request
-import urllib.error
 from datetime import datetime, timedelta
 
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-app = Flask(
-    __name__,
-    template_folder=os.path.join(BASE_DIR, "templates"),
-    static_folder=os.path.join(BASE_DIR, "static"),
-    static_url_path="/static"
-)
+app = Flask(__name__)
 
 app.secret_key = os.environ.get(
     "SECRET_KEY",
     "pulsecheck-demo-secret"
 )
 
-# Safe cookie defaults for local HTTP and Vercel HTTPS.
-app.config.update(
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=bool(os.environ.get("VERCEL"))
+DB = os.path.join(
+    os.path.dirname(__file__),
+    "pulsecheck.db"
 )
-
-# Keep the existing SQLite database for local development.
-# Vercel's deployment filesystem is not persistent, so use /tmp there
-# rather than attempting to write beside the deployed source files.
-if os.environ.get("VERCEL"):
-    DB = "/tmp/pulsecheck.db"
-else:
-    DB = os.path.join(
-        os.path.dirname(__file__),
-        "pulsecheck.db"
-    )
 
 
 # =========================================================
@@ -322,23 +300,6 @@ def risk_for(team_id):
         """,
         (team_id,)
     ).fetchone()
-
-    # Optional mentor tip: use the latest tip as additional AI context.
-    # This does not change the existing tip feature or database behavior.
-    try:
-        latest_tip = c.execute(
-            """
-            SELECT tip
-            FROM mentor_tips
-            WHERE team_id=?
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            (team_id,)
-        ).fetchone()
-        mentor_tip = latest_tip["tip"] if latest_tip else ""
-    except sqlite3.OperationalError:
-        mentor_tip = ""
 
     c.close()
 
@@ -1172,234 +1133,187 @@ def mentor_delete_team(tid):
 # SMART AI SOLUTION ENGINE
 # =========================================================
 
-def _fallback_smart_solution(team_name, status, blocker, accomplished, next_step, mentor_tip=""):
-    """
-    Safe local fallback used only when no AI API key is configured or
-    the AI service cannot be reached.
+def generate_smart_solution(team_name, status, blocker, accomplished, next_step):
+    """Deterministic, context-first mentor copilot.
 
-    It intentionally avoids pretending to know a technical cause that
-    the team did not report.
+    This intentionally does not invent technical failures. The first
+    matching rule is the actual blocker/question reported by the team,
+    then status/completed work/next step refine the plan.
     """
-    blocker = (blocker or "").strip() or "No blocker was reported."
-    accomplished = (accomplished or "").strip() or "Not provided."
-    next_step = (next_step or "").strip() or "Not provided."
-    mentor_tip = (mentor_tip or "").strip()
+    raw_blocker = (blocker or "").strip()
+    raw_done = (accomplished or "").strip()
+    raw_next = (next_step or "").strip()
+
+    blocker_text = raw_blocker or "No blocker was reported."
+    done_text = raw_done or "Not provided."
+    next_text = raw_next or "Not provided."
+    text = f"{blocker_text} {next_text}".lower().strip()
+
+    category = "Team Progress"
+    diagnosis = "The team has not described a specific technical failure. The plan therefore starts from the exact situation reported instead of assuming a different problem."
+    actions = [
+        f"Restate the immediate goal in one sentence: {next_text}.",
+        "Choose one person to own the next action and one person to support them.",
+        "Work only on that action for the next 30 minutes.",
+        "Record the result as DONE, BLOCKED, or NEEDS HELP.",
+        "If blocked again, report the exact missing input or decision to the mentor."
+    ]
+    target = "One clearly defined next action is completed or reaches a documented handoff."
+    success = "The team can point to a concrete result and a clear next owner."
+
+    # 1) Human conversation / coordination — must be checked before generic UI terms.
+    if any(k in text for k in [
+        "start a quick team conversation", "quick team conversation",
+        "team conversation", "start conversation", "how do i talk",
+        "how do i communicate", "standup", "quick meeting", "team meeting",
+        "not cooperating", "not responding", "coordination", "communication",
+        "conflict between", "members are not", "member is not"
+    ]):
+        category = "Team Coordination / Communication"
+        diagnosis = "The reported need is a team conversation or coordination step, not a product bug. The immediate goal is to create a short, structured conversation that ends with ownership."
+        actions = [
+            "Open the team's shared chat or call and post: '10-minute sync — blocker, owner, next action.'",
+            "Give each member 30 seconds to state: DONE, BLOCKED, and what they can finish next.",
+            "Pick one immediate deliverable and name exactly one owner for it.",
+            "Ask anyone blocked to state the exact help they need and who can provide it.",
+            "End by writing the final owner + next action + 30-minute target in the shared chat."
+        ]
+        target = "A 10-minute team sync ends with one owner and one concrete 30-minute task."
+        success = "Every active member knows what they own next, and the reported coordination issue has a specific follow-up."
+
+    # 2) Presentation / pitch / demo.
+    elif any(k in text for k in ["ppt", "presentation", "slides", "pitch", "demo", "viva"]):
+        category = "Presentation / Demo"
+        diagnosis = "The reported work is presentation or demonstration focused. The fastest path is to freeze scope and make the existing product easy to explain and demonstrate."
+        actions = [
+            "Freeze new features for this work session and list only the screens needed for the demo.",
+            "Assign one owner for slides, one for the live demo, and one for fact-checking.",
+            "Build the story as problem → solution → workflow → technology → impact.",
+            "Run the exact demo once from login to the final result without changing the flow.",
+            "Keep screenshots of the critical screens as a fallback for the presentation."
+        ]
+        target = "A complete first-pass pitch and one repeatable end-to-end demo are ready."
+        success = "The team can explain the problem clearly and demonstrate the core workflow without scope changes."
+
+    # 3) Authentication / team access.
+    elif any(k in text for k in ["login", "log in", "sign in", "password", "account", "join team", "create team", "team access"]):
+        category = "Authentication / Team Access"
+        diagnosis = "The report concerns entry or team membership. Verify session and membership state first; do not change unrelated dashboard components."
+        actions = [
+            "Reproduce the exact login or team-access flow with one test account.",
+            "Confirm the login request creates the expected session user.",
+            "Confirm the user is either creating one team or joining the selected existing team.",
+            "For joining, verify the team row and team_members row exist after the request.",
+            "Refresh the dashboard and verify the team name and member list use the same team id."
+        ]
+        target = "The test account reaches exactly one intended team and its membership is visible after refresh."
+        success = "The correct team name and members appear without creating an unintended second team."
+
+    # 4) Database/data.
+    elif any(k in text for k in ["database", "sqlite", "sql", "schema", "table", "query", "data not", "data missing"]):
+        category = "Database / Data"
+        diagnosis = "The blocker points to stored data. The correct first move is to verify the affected record and query rather than redesigning the application."
+        actions = [
+            "Identify the exact table and record the current screen expects.",
+            "Check that the required columns exist in the current SQLite schema.",
+            "Run the smallest read/write test with one known team or user.",
+            "Fix only the schema or query mismatch found by that test.",
+            "Repeat the original user flow and verify the saved record is returned."
+        ]
+        target = "The affected record can be written and read back correctly with known test data."
+        success = "The original screen shows the expected stored data after a fresh request."
+
+    # 5) Backend/API.
+    elif any(k in text for k in ["backend", "api", "server", "flask", "endpoint", "request", "response", "500", "404"]):
+        category = "Backend / API"
+        diagnosis = "The blocker explicitly names the backend/API layer. Isolate the single request involved and fix that contract before touching the rest of the UI."
+        actions = [
+            "Identify the exact endpoint used by the affected screen.",
+            "Call that endpoint with one known input and record its status code.",
+            "Fix the first server-side exception or validation error returned by that request.",
+            "Verify the JSON field names match what the current frontend reads.",
+            "Repeat the complete user flow once the endpoint returns the expected response."
+        ]
+        target = "The affected endpoint returns the expected JSON response for one real test request."
+        success = "The original frontend action completes using the verified backend response."
+
+    # 6) Frontend/UI/browser.
+    elif any(k in text for k in ["frontend", "ui", "screen", "button", "page", "display", "visible", "loading", "javascript", "browser", "click"]):
+        category = "Frontend / UI"
+        diagnosis = "The blocker explicitly concerns the user-facing interface. Reproduce the exact interaction and inspect the first observable UI failure before changing other screens."
+        actions = [
+            "Open the exact screen and reproduce the reported interaction once.",
+            "Check the browser console and Network tab for the first failed request or JavaScript error.",
+            "Verify the element id, event handler, endpoint and returned field names used by that screen.",
+            "Fix only the affected component and keep the existing layout unchanged.",
+            "Repeat the full user flow from the first click to the expected visible result."
+        ]
+        target = "The exact reported UI action reaches its expected visible result without a console or network error."
+        success = "The user can complete the affected action from the current screen without changing unrelated UI."
+
+    # 7) Deadline / time pressure.
+    elif any(k in text for k in ["deadline", "time left", "hours left", "tomorrow", "urgent", "late", "behind schedule"]):
+        category = "Deadline / Prioritization"
+        diagnosis = "The report is schedule-related. The immediate response is to reduce scope to the smallest demonstrable outcome and assign ownership."
+        actions = [
+            "List the remaining work and mark each item CORE, SUPPORTING, or OPTIONAL.",
+            "Freeze OPTIONAL work until the core workflow is stable.",
+            "Assign one owner to each CORE item and identify dependencies.",
+            "Run a short integration check after the next core item is completed.",
+            "Keep a backup demo path using screenshots or a recorded flow for fragile steps."
+        ]
+        target = "The core user journey is stable and the remaining work has clear owners."
+        success = "The team can demonstrate the core outcome without depending on unfinished optional features."
+
+    # 8) Resource / skill / dependency.
+    elif any(k in text for k in ["need a", "need help", "expert", "resource", "no one knows", "dependency", "someone to"]):
+        category = "Resource / Skill Dependency"
+        diagnosis = "The team reports a missing person, skill, or dependency. The useful next step is to define the smallest handoff needed rather than waiting for a full replacement."
+        actions = [
+            "State the exact task that is blocked and the skill/input it requires.",
+            "Break that task into a small handoff that another member or mentor can review.",
+            "Ask for one specific piece of help rather than general assistance.",
+            "Continue independent work that does not depend on the missing input.",
+            "Set a checkpoint to merge the help back into the main workflow."
+        ]
+        target = "The dependency is reduced to one concrete handoff with an owner and checkpoint."
+        success = "The team either receives the required input or has a documented workaround."
 
     return f"""AI SOLUTION PLAN
-
 Team: {team_name}
 
-CURRENT STATUS
+PROBLEM CATEGORY
+{category}
+
+TEAM STATUS
 {status}
 
-ACTUAL TEAM REPORT
-Blocker: {blocker}
-Already completed: {accomplished}
-Reported next step: {next_step}
-Mentor tip: {mentor_tip or "No mentor tip provided."}
+WHAT THE TEAM REPORTED
+Blocker: {blocker_text}
+Already completed: {done_text}
+Reported next step: {next_text}
 
-PROBLEM UNDERSTANDING
-The current information does not prove a specific technical root cause. The safest approach is to solve the reported blocker directly, preserve completed work, and verify each step before changing unrelated parts of the project.
+AI DIAGNOSIS
+{diagnosis}
 
-IMMEDIATE ACTION PLAN
-1. Turn the blocker into one concrete, testable task.
-2. Assign one primary owner and one support member.
-3. Keep already completed work unchanged unless testing shows it is part of the problem.
-4. Work on the smallest useful result first and verify it.
-5. If the task remains blocked, report the exact error, missing input, dependency, or decision needed.
-
-30-MINUTE TARGET
-Produce one concrete result: a working fix, a verified cause, or a clearly documented handoff to the person who can resolve it.
-
-SUCCESS CONDITION
-The team can demonstrate what changed, what works now, and who owns the next step.
-
-MENTOR CHECKPOINT
-Ask the team to demonstrate the blocker and the result of the first action before recommending a larger change.
-
-NOTE
-This is the local fallback plan. When PULSECHECK_AI_API_KEY/OPENAI_API_KEY is configured, PulseCheck uses the AI Mentor Copilot for a situation-specific solution."""
-
-
-def generate_ai_solution(team_name, status, blocker, accomplished, next_step, mentor_tip=""):
-    """
-    Real AI Mentor Copilot.
-
-    The model receives the complete team situation and is explicitly told
-    not to guess missing facts. This makes it useful for technical,
-    coordination, presentation, deadline, deployment, database, AI/ML,
-    integration, or other problems without maintaining a giant keyword list.
-
-    Supported environment variables:
-      OPENAI_API_KEY or PULSECHECK_AI_API_KEY
-      PULSECHECK_AI_MODEL (default: gpt-5.6-luna)
-    """
-    api_key = (
-        os.environ.get("PULSECHECK_AI_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-        or ""
-    ).strip()
-
-    if not api_key:
-        return _fallback_smart_solution(
-            team_name, status, blocker, accomplished, next_step, mentor_tip
-        )
-
-    model = os.environ.get("PULSECHECK_AI_MODEL", "gpt-5.6-luna").strip()
-
-    prompt = f"""
-You are the AI Mentor Copilot inside PulseCheck, a hackathon/team-progress
-platform.
-
-Your job is to solve the team's ACTUAL reported problem. You are not a
-keyword classifier and you must not force the situation into a predefined
-category.
-
-Analyze the complete situation:
-- team name
-- current status
-- actual blocker
-- completed work
-- reported next step
-- mentor's optional tip
-
-Important rules:
-1. Treat the BLOCKER as the primary problem statement.
-2. Use completed work as a constraint: do not tell the team to redo work
-   that is already completed unless the reported evidence indicates it is
-   actually part of the problem.
-3. If the problem is technical, give practical debugging/implementation
-   steps.
-4. If the problem is people/coordination related, give a practical team
-   recovery plan.
-5. If several problems exist, identify the immediate bottleneck and put
-   other work in priority order.
-6. Never invent an error message, architecture, technology, team member
-   skill, root cause, or completed feature that was not reported.
-7. When the exact root cause is unknown, say that it is unknown and give
-   the smallest test that will identify it.
-8. Do not give generic motivational advice as the main solution.
-9. Make the plan realistic for a hackathon team with limited time.
-10. Include a fallback/demo-safe approach when the primary fix may take
-    too long.
-11. The mentor tip is context, not unquestionable truth. Use it when it
-    helps, but do not repeat it as a fact if it conflicts with the team
-    report.
-12. Keep the answer concrete enough that the team can start immediately.
-
-Return ONLY a structured plain-text solution with exactly these sections:
-
-AI SOLUTION PLAN
-Team:
-Problem understanding:
-Problem category:
-Current status:
-Actual blocker:
-Already completed:
-Reported next step:
-Mentor tip:
-
-ROOT CAUSE / WHAT IS KNOWN
-...
-
-PRIORITY
-1. ...
-2. ...
-3. ...
-
-STEP-BY-STEP ACTION
-1. ...
-2. ...
-3. ...
-4. ...
-5. ...
-
-OWNER / SUPPORT
-Primary owner:
-Support:
-Mentor:
+WHAT TO DO NOW
+1. {actions[0]}
+2. {actions[1]}
+3. {actions[2]}
+4. {actions[3]}
+5. {actions[4]}
 
 30-MINUTE TARGET
-...
+{target}
 
 SUCCESS CONDITION
-...
-
-IF THE FIRST PLAN FAILS
-...
+{success}
 
 MENTOR CHECKPOINT
-...
+After the first action, ask the team to report the observable result before changing the plan.
 
-TEAM INPUT
-Team: {team_name}
-Status: {status}
-Blocker: {blocker or "Not provided"}
-Completed: {accomplished or "Not provided"}
-Next step: {next_step or "Not provided"}
-Mentor tip: {mentor_tip or "Not provided"}
-""".strip()
-
-    payload = {
-        "model": model,
-        "input": prompt,
-        "max_output_tokens": 1800
-    }
-
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}"
-        },
-        method="POST"
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            body = json.loads(response.read().decode("utf-8"))
-
-        # Responses API commonly exposes output_text directly.
-        solution = (body.get("output_text") or "").strip()
-
-        # Robust fallback for responses where output_text is not populated.
-        if not solution:
-            parts = []
-            for item in body.get("output", []) or []:
-                for content in item.get("content", []) or []:
-                    if isinstance(content, dict) and content.get("text"):
-                        parts.append(str(content["text"]))
-            solution = "\n".join(parts).strip()
-
-        if not solution:
-            raise ValueError("AI returned an empty solution.")
-
-        return solution
-
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
-        print(f"[PulseCheck AI] AI service unavailable: {exc}")
-        return _fallback_smart_solution(
-            team_name, status, blocker, accomplished, next_step, mentor_tip
-        )
-    except Exception as exc:
-        print(f"[PulseCheck AI] Unexpected AI error: {exc}")
-        return _fallback_smart_solution(
-            team_name, status, blocker, accomplished, next_step, mentor_tip
-        )
-
-
-# Keep this name so any existing frontend/backend code that calls
-# generate_smart_solution directly continues to work.
-def generate_smart_solution(team_name, status, blocker, accomplished, next_step, mentor_tip=""):
-    return generate_ai_solution(
-        team_name=team_name,
-        status=status,
-        blocker=blocker,
-        accomplished=accomplished,
-        next_step=next_step,
-        mentor_tip=mentor_tip
-    )
+WHY THIS PLAN IS SPECIFIC
+The plan is anchored to the team's exact blocker first, then refined with the reported status, completed work and next step. It does not invent a technical failure when the team has reported a communication, planning or other non-technical need."""
 
 
 # =========================================================
@@ -1458,21 +1372,6 @@ def generate_solution():
         (team_id,)
     ).fetchone()
 
-    # Read the latest mentor tip for this team. This is optional context
-    # for the AI and does not change the existing team/pulse workflow.
-    mentor_tip_row = c.execute(
-        """
-        SELECT tip
-        FROM mentor_tips
-        WHERE team_id=?
-        ORDER BY created_at DESC
-        LIMIT 1
-        """,
-        (team_id,)
-    ).fetchone()
-
-    mentor_tip = mentor_tip_row["tip"] if mentor_tip_row else ""
-
     c.close()
 
     if not team:
@@ -1511,9 +1410,7 @@ def generate_solution():
 
         accomplished=pulse["accomplished"],
 
-        next_step=pulse["next_step"],
-
-        mentor_tip=mentor_tip
+        next_step=pulse["next_step"]
     )
 
     return jsonify(
@@ -2072,13 +1969,6 @@ def recommendation():
         risk_score=risk["score"]
 
     )
-
-
-# Vercel imports the Flask application instead of executing this file as
-# __main__, so initialize the SQLite schema/seeds during module import.
-# Local development still uses the normal __main__ block below.
-if os.environ.get("VERCEL"):
-    init_db()
 
 
 # =========================================================
