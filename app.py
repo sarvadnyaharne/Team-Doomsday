@@ -5,17 +5,23 @@ import os
 from datetime import datetime, timedelta
 
 
-app = Flask(__name__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+app = Flask(
+    __name__,
+    template_folder=os.path.join(BASE_DIR, "templates"),
+    static_folder=os.path.join(BASE_DIR, "static")
+)
 
 app.secret_key = os.environ.get(
     "SECRET_KEY",
     "pulsecheck-demo-secret"
 )
 
-DB = os.path.join(
-    os.path.dirname(__file__),
-    "pulsecheck.db"
-)
+if os.environ.get("VERCEL"):
+    DB = "/tmp/pulsecheck.db"
+else:
+    DB = os.path.join(BASE_DIR, "pulsecheck.db")
 
 
 # =========================================================
@@ -224,6 +230,12 @@ def init_db():
 
     c.commit()
     c.close()
+
+    # Initialize database when Flask is imported by Vercel/serverless.
+try:
+    init_db()
+except Exception as e:
+    print("Database initialization error:", e)
 
 
 # =========================================================
